@@ -101,7 +101,7 @@ jobs:
         working-directory: frontend-js
 
       - name: Lint
-        run: npm run lint
+        run: npm run lint -- --max-warnings 10
         working-directory: frontend-js
 
       - name: Run tests
