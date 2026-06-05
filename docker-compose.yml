@@ -1,0 +1,79 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOCAL DEVELOPMENT – docker compose up --build
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: polyglot-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - polyglot-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── .NET Backend API ───────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend-dotnet
+      dockerfile: Dockerfile
+    container_name: polyglot-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_URLS=http://+:8080
+      - REDIS_URL=redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - polyglot-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Python Worker ──────────────────────────────────────────────────────────
+  worker:
+    build:
+      context: ./worker-python
+      dockerfile: Dockerfile
+    container_name: polyglot-worker
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - HEARTBEAT_INTERVAL=10
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - polyglot-net
+
+  # ── React Frontend ─────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend-js
+      dockerfile: Dockerfile
+    container_name: polyglot-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - polyglot-net
+
+networks:
+  polyglot-net:
+    driver: bridge

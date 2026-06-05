@@ -1,0 +1,75 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRODUCTION – used by Jenkins to deploy on the cloud VM
+# Requires env vars: DOCKER_USERNAME, TAG
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: polyglot-redis
+    restart: always
+    networks:
+      - polyglot-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis-data:/data
+
+  backend:
+    image: ${DOCKER_USERNAME}/polyglot-backend:${TAG:-latest}
+    container_name: polyglot-backend
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_URLS=http://+:8080
+      - ASPNETCORE_ENVIRONMENT=Production
+      - REDIS_URL=redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - polyglot-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/status"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
+  worker:
+    image: ${DOCKER_USERNAME}/polyglot-worker:${TAG:-latest}
+    container_name: polyglot-worker
+    restart: always
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - HEARTBEAT_INTERVAL=15
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - polyglot-net
+
+  frontend:
+    image: ${DOCKER_USERNAME}/polyglot-frontend:${TAG:-latest}
+    container_name: polyglot-frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - polyglot-net
+
+networks:
+  polyglot-net:
+    driver: bridge
+
+volumes:
+  redis-data:

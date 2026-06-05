@@ -1,0 +1,45 @@
+# ── Terraform ─────────────────────────────────────────────────────────────────
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfvars
+*.tfplan
+.terraform.lock.hcl
+
+# ── Secrets / Keys ────────────────────────────────────────────────────────────
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+secrets/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+venv/
+.pytest_cache/
+
+# ── Node.js ───────────────────────────────────────────────────────────────────
+node_modules/
+frontend-js/dist/
+*.log
+
+# ── .NET ──────────────────────────────────────────────────────────────────────
+backend-dotnet/src/*/bin/
+backend-dotnet/src/*/obj/
+backend-dotnet/tests/*/bin/
+backend-dotnet/tests/*/obj/
+*.user
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+.docker/
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db

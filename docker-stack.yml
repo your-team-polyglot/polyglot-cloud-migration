@@ -1,0 +1,50 @@
+﻿version: "3.9"
+
+services:
+  backend:
+    image: arshmanzahid/backend-dotnet:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+    networks:
+      - polyglot-net
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+
+  worker:
+    image: arshmanzahid/worker-python:latest
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    networks:
+      - polyglot-net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  frontend:
+    image: arshmanzahid/frontend-js:latest
+    ports:
+      - "80:80"
+    networks:
+      - polyglot-net
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+
+  redis:
+    image: redis:7-alpine
+    networks:
+      - polyglot-net
+    deploy:
+      replicas: 1
+
+networks:
+  polyglot-net:
+    driver: overlay
