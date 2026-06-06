@@ -1,145 +1,40 @@
-pipeline {
+﻿pipeline {
     agent any
-
     environment {
-        DOCKER_USERNAME  = credentials('docker-username')
-        IMAGE_PREFIX     = "${DOCKER_USERNAME}/polyglot"
-        CLOUD_VM_IP      = credentials('cloud-vm-ip')
-        SSH_CREDS        = credentials('cloud-vm-ssh-key')
-        IMAGE_TAG        = "${params.IMAGE_TAG ?: 'latest'}"
-        DEPLOY_DIR       = '/opt/polyglot'
-        APP_URL          = "http://${CLOUD_VM_IP}:3000"
+        DOCKER_USER = credentials('docker-username')
     }
-
-    parameters {
-        string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Docker image tag to deploy')
-    }
-
-    options {
-        timeout(time: 15, unit: 'MINUTES')
-        buildDiscarder(logRotator(numToKeepStr: '10'))
-        disableConcurrentBuilds()
-        timestamps()
-    }
-
     stages {
-
-        stage('Checkout') {
+        stage('Pull Images') {
             steps {
-                checkout scm
-                echo "Deploying tag: ${IMAGE_TAG}"
-            }
-        }
-
-        stage('Verify Images Exist') {
-            steps {
-                script {
-                    def services = ['backend', 'worker', 'frontend']
-                    for (svc in services) {
-                        sh """
-                            docker manifest inspect ${IMAGE_PREFIX}-${svc}:${IMAGE_TAG} > /dev/null
-                            echo "✓ Image ${IMAGE_PREFIX}-${svc}:${IMAGE_TAG} exists"
-                        """
-                    }
-                }
-            }
-        }
-
-        stage('Copy Deploy Files') {
-            steps {
-                sshagent(credentials: ['cloud-vm-ssh-key']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ec2-user@${CLOUD_VM_IP} \
-                            "mkdir -p ${DEPLOY_DIR}"
-
-                        scp -o StrictHostKeyChecking=no \
-                            deploy/docker-compose.prod.yml \
-                            deploy/deploy.sh \
-                            ec2-user@${CLOUD_VM_IP}:${DEPLOY_DIR}/
-                    """
-                }
-            }
-        }
-
-        stage('Pull Images on Cloud VM') {
-            steps {
-                sshagent(credentials: ['cloud-vm-ssh-key']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ec2-user@${CLOUD_VM_IP} \
-                            "DOCKER_USERNAME=${DOCKER_USERNAME} TAG=${IMAGE_TAG} \
-                             docker compose -f ${DEPLOY_DIR}/docker-compose.prod.yml pull"
-                    """
-                }
-            }
-        }
-
-        stage('Deploy Containers') {
-            steps {
-                sshagent(credentials: ['cloud-vm-ssh-key']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ec2-user@${CLOUD_VM_IP} \
-                            "DOCKER_USERNAME=${DOCKER_USERNAME} TAG=${IMAGE_TAG} \
-                             docker compose -f ${DEPLOY_DIR}/docker-compose.prod.yml up -d --remove-orphans"
-                    """
-                }
-            }
-        }
-
-        stage('Health Check') {
-            steps {
-                script {
-                    def maxRetries = 10
-                    def retryInterval = 10
-
-                    for (int i = 1; i <= maxRetries; i++) {
-                        try {
-                            sh "curl -sf ${APP_URL} > /dev/null"
-                            echo "✓ Health check passed on attempt ${i}"
-                            return
-                        } catch (Exception e) {
-                            if (i == maxRetries) {
-                                error "Health check failed after ${maxRetries} attempts"
-                            }
-                            echo "Attempt ${i}/${maxRetries} failed. Retrying in ${retryInterval}s…"
-                            sleep retryInterval
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Show Running Containers') {
-            steps {
-                sshagent(credentials: ['cloud-vm-ssh-key']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ec2-user@${CLOUD_VM_IP} \
-                            "docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'"
-                    """
-                }
-            }
-        }
-    }
-
-    post {
-        success {
-            echo """
-╔══════════════════════════════════════╗
-║  ✅  DEPLOYMENT SUCCESSFUL           ║
-║  App: ${APP_URL}
-╚══════════════════════════════════════╝
-            """
-        }
-        failure {
-            echo "❌ Deployment FAILED. Check logs above."
-            sshagent(credentials: ['cloud-vm-ssh-key']) {
                 sh """
-                    ssh -o StrictHostKeyChecking=no ec2-user@${CLOUD_VM_IP} \
-                        "docker compose -f ${DEPLOY_DIR}/docker-compose.prod.yml logs --tail=50" || true
+                    echo ${DOCKER_USER_PSW} | docker login -u ${DOCKER_USER_USR} --password-stdin
+                    docker pull ${DOCKER_USER_USR}/backend-dotnet:latest
+                    docker pull ${DOCKER_USER_USR}/worker-python:latest
+                    docker pull ${DOCKER_USER_USR}/frontend-js:latest
                 """
             }
         }
-        always {
-            cleanWs()
+        stage('Deploy') {
+            steps {
+                sh """
+                    docker stop polyglot-backend polyglot-frontend polyglot-worker polyglot-redis 2>/dev/null || true
+                    docker rm polyglot-backend polyglot-frontend polyglot-worker polyglot-redis 2>/dev/null || true
+                    docker network create polyglot-net 2>/dev/null || true
+                    docker run -d --name polyglot-redis --network polyglot-net redis:7-alpine
+                    docker run -d --name polyglot-backend --network polyglot-net -p 8081:8080 ${DOCKER_USER_USR}/backend-dotnet:latest
+                    docker run -d --name polyglot-worker --network polyglot-net -e REDIS_HOST=polyglot-redis ${DOCKER_USER_USR}/worker-python:latest
+                    docker run -d --name polyglot-frontend --network polyglot-net -p 80:80 ${DOCKER_USER_USR}/frontend-js:latest
+                """
+            }
         }
+        stage('Health Check') {
+            steps {
+                sh 'sleep 10 && curl -f http://localhost:8081/api/status'
+            }
+        }
+    }
+    post {
+        success { echo 'Deployment successful!' }
+        failure { echo 'Deployment failed!' }
     }
 }
